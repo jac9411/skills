@@ -105,6 +105,50 @@ Para ejecutar comandos rápidos o de verificación (como compilaciones o tests) 
 
 ---
 
+## 📢 Feedback en Tiempo Real y Reporte de Estado (TUI/API)
+
+Para ofrecer visibilidad en tiempo real al usuario de lo que los agentes están haciendo en paralelo (especialmente útil en la TUI visual de Herdr), los agentes deben utilizar los comandos de reporte dinámico utilizando la variable de entorno `$HERDR_PANE_ID` que inyecta Herdr de forma nativa en cada panel:
+
+### 1. Reportar el Estado de Actividad del Agente (`report-agent`)
+Permite definir el nombre del agente, su estado interno (`working`, `blocked`, `idle`) y una descripción de texto corta de lo que está haciendo (se actualiza dinámicamente en el encabezado de Herdr):
+```bash
+herdr pane report-agent "$HERDR_PANE_ID" \
+  --source "gemini" \
+  --agent "Backend-Agent" \
+  --state "working" \
+  --custom-status "TDD: Escribiendo Tests unitarios..."
+```
+
+### 2. Actualizar los Metadatos y Título del Panel (`report-metadata`)
+Permite cambiar el título dinámico del panel de la terminal en Herdr para denotar fases del ciclo de vida (ej: TDD, auditoría, mutaciones) y complementar la visualización:
+```bash
+herdr pane report-metadata "$HERDR_PANE_ID" \
+  --source "gemini" \
+  --title "TDD Backend [ROJO]" \
+  --custom-status "Compilando con Gradle..."
+```
+
+### 💡 Ejemplo de Estructura de Script con Feedback Dinámico:
+```bash
+#!/bin/bash
+# Reporte Fase Inicial
+herdr pane report-agent "$HERDR_PANE_ID" --source "gemini" --agent "TDD-Agent" --state "working" --custom-status "Investigando..."
+herdr pane report-metadata "$HERDR_PANE_ID" --source "gemini" --title "Fase: Investigación"
+
+# Ejecutar proceso
+gemini --prompt "Analizar especificaciones..." --approval-mode yolo
+
+# Reporte de TDD Activo
+herdr pane report-agent "$HERDR_PANE_ID" --source "gemini" --agent "TDD-Agent" --state "working" --custom-status "Fase Verde: Codificando..."
+herdr pane report-metadata "$HERDR_PANE_ID" --source "gemini" --title "Fase: TDD [VERDE]"
+
+# Finalizar
+herdr pane report-agent "$HERDR_PANE_ID" --source "gemini" --agent "TDD-Agent" --state "idle" --custom-status "Trabajo finalizado al 100%"
+herdr pane report-metadata "$HERDR_PANE_ID" --source "gemini" --title "Estado: COMPLETADO"
+```
+
+---
+
 ## 🛡️ Reglas de Seguridad y Coordinación de Paneles
 
 - Utiliza siempre `--no-focus` para tareas en segundo plano a menos que el usuario solicite explícitamente cambiar de contexto.

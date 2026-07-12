@@ -1,21 +1,18 @@
-# Reporte de Auditoría de Calidad y Arquitectura
+# Reporte de Auditoría: [XXXX-nombre_feature]
 
-* **Fecha/Hora de Auditoría:** YYYY-MM-DD HH:MM
-* **Feature Auditada:** [XXXX-nombre_feature]
-* **Estado General:** [APROBADO (audit_passed) / FALLIDO (audit_failed)]
+- **Estado:** [passed/failed]
 
-## 1. Lista de Verificación de Trazabilidad (Gherkin Scenarios)
-- [ ] @S1 mapped to `[ruta_test:linea]`
-- [ ] @S2 mapped to `[ruta_test:linea]`
+## 1. Trazabilidad
+- [ ] @S1 -> `test_file`
+- [ ] @S2 -> `test_file`
 
-## 2. Evaluación de Refactoring (TDD Discipline)
-- [ ] @S1: [Cumple / No Cumple] - [Comentario muy conciso]
-- [ ] @S2: [Cumple / No Cumple] - [Comentario muy conciso]
+## 2. Refactoring
+- [ ] Cumple convenciones: [SÍ/NO]
 
-## 3. Calidad de Código, i18n y Cero Hacks
-- **Traducciones completas (es, gl):** [SÍ / NO / No aplica]
-- **Cero Hacks (any, supresiones, casts):** [SÍ / NO]
-- **Compilación Limpia:** [SÍ / NO]
+## 3. Calidad (i18n, Hacks, Build)
+- [ ] i18n (es, gl, ca): [SÍ/NO]
+- [ ] Sin hacks: [SÍ/NO]
+- [ ] Compilación: [SÍ/NO]
 
-## 4. Conclusión e Instrucción
-- [Mensaje conciso del veredicto final e indicación para el orquestador]
+## 4. Veredicto
+- [Comentario final]

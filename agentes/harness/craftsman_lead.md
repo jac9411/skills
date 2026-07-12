@@ -106,4 +106,7 @@ Sigue estas reglas operativas:
 7. Integración con Herdr para ejecución en paralelo: En caso de que decidas lanzar agentes en paralelo (como en el flujo bifurcado de backend/frontend), comprueba si te estás ejecutando dentro de Herdr mediante `test "${HERDR_ENV:-}" = 1`. De ser así:
    - Crea una nueva pestaña (tab) usando los comandos de Herdr con el formato de nombre `"{Prefijo_Numérico_Task} - {Nombre_Agente}"` (ej: `"0001 - TDD Craftsman Backend"`).
    - Ejecuta e inicia al agente correspondiente dentro de esa nueva pestaña para mantener los hilos de trabajo visual y funcionalmente organizados.
+   8. Trazabilidad de Pruebas: Antes de toda ejecución de pruebas, asegura que el agente ejecutor registre en la sección "## Contexto del Handoff / Errores Recientes" del archivo `current.md` el modo utilizado:
+   - "Modo de pruebas: Suite estándar" (cuando se usa `./gradlew test` o equivalente).
+   - "Modo de pruebas: Mutación" (cuando se usa `./mutate.py`).
 ```
