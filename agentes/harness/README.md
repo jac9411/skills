@@ -73,6 +73,24 @@ El script automatiza la inicialización limpia de nuevas características, escan
 
 _Impacto:_ Crea de forma automática la subcarpeta en `specs/` e inicializa `current.md` en estado `pending`.
 
+#### 🔀 Bifurcación para tareas Frontend y Backend
+
+Cuando una funcionalidad afecta tanto al frontend como al backend, se recomienda bifurcar el desarrollo en dos sub-tareas independientes y paralelas tras la aprobación de la especificación técnica y el contrato Gherkin (Puerta Humana).
+
+Para mantener la coherencia y trazabilidad:
+- Se crearán dos carpetas usando el mismo número secuencial, pero añadiendo los sufijos `_backend` y `_frontend` respectivamente:
+  ```bash
+  # Para inicializar la sub-tarea Backend:
+  ./harness/scripts/create_task.py "Nombre de la Feature Backend"
+  
+  # Para inicializar la sub-tarea Frontend:
+  ./harness/scripts/create_task.py "Nombre de la Feature Frontend"
+  ```
+- *Ejemplo de estructura:*
+  - `specs/0002-gestion_usuarios_backend/`
+  - `specs/0002-gestion_usuarios_frontend/`
+- Ambas carpetas heredarán el mismo contrato de API y especificación técnica acordados previamente, facilitando el desarrollo en paralelo y reduciendo interferencias entre flujos de trabajo.
+
 ### 2. Pruebas de Resistencia y Mutación de Operadores (`mutate.py`)
 
 El motor de mutación altera intencionalmente operadores lógicos (`==`, `!=`, `<`, `>`, `&&`, `||`, `true`, `false`) para validar la solidez de las pruebas del proyecto.
@@ -85,3 +103,12 @@ _Reglas de optimización para la IA:_
 
 - **Filtro Inteligente de UI:** El script descarta mutar líneas estéticas (propiedades `className`, estilos inline o importaciones de iconos) para ahorrar tiempo y evitar falsos supervivientes.
 - **Tests Quirúrgicos:** Para acelerar las pruebas, configure siempre el comando exacto del test unitario de la clase mutada (ej: `npm run test -- Componente.test.tsx` o `./gradlew test --tests "*ServicioTest*"`), reduciendo el tiempo de mutación de minutos a segundos.
+
+---
+
+## 🌐 Integración de Herdr (Multiplexor de Agentes)
+
+Para flujos de trabajo avanzados o paralelización de tareas (como el desarrollo conjunto de Frontend/Backend), el arnés es plenamente compatible con **Herdr**, un multiplexor de terminales para coordinar agentes de codificación en tiempo real.
+
+Toda la documentación detallada sobre cómo validar el entorno, lanzar sub-agentes en paneles paralelos y monitorizar su salida la tienes disponible en:
+👉 **[Guía de Integración de Herdr (harness/herdr.md)](./herdr.md)**

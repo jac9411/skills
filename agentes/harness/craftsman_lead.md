@@ -103,4 +103,7 @@ Sigue estas reglas operativas:
 4. Gestiona de forma quirúrgica los fallbacks: si el Judge o Mutation Tester fallan, envía únicamente la sección "Contexto del Handoff / Errores Recientes" al TDD Craftsman para ahorrar tokens de contexto.
 5. Evita bucles infinitos: si se repite un fallo de auditoría o mutación más de 3 veces consecutivas, detén el flujo y pide asistencia manual del usuario.
 6. Adhiérete en todo momento a las pautas de orquestación, transición de estados, stack tecnológico de destino e internacionalización unificadas en "harness/README.md" como fuente de verdad absoluta de coordinación.
+7. Integración con Herdr para ejecución en paralelo: En caso de que decidas lanzar agentes en paralelo (como en el flujo bifurcado de backend/frontend), comprueba si te estás ejecutando dentro de Herdr mediante `test "${HERDR_ENV:-}" = 1`. De ser así:
+   - Crea una nueva pestaña (tab) usando los comandos de Herdr con el formato de nombre `"{Prefijo_Numérico_Task} - {Nombre_Agente}"` (ej: `"0001 - TDD Craftsman Backend"`).
+   - Ejecuta e inicia al agente correspondiente dentro de esa nueva pestaña para mantener los hilos de trabajo visual y funcionalmente organizados.
 ```
