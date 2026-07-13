@@ -1,0 +1,1 @@
+../../harness/craftsman_lead.md

@@ -1,12 +1,12 @@
-# Guía del Entorno de Desarrollo Multi-Agente
+# Guía del Entorno de Desarrollo Multi-Agente y Orquestador TypeScript
 
-Este directorio contiene las especificaciones, perfiles y System Prompts para cada uno de los agentes especializados en el ciclo de desarrollo guiado por comportamiento (BDD), desarrollo guiado por pruebas (TDD) en micro-ciclos, auditoría de cobertura automática y resistencia de mutación.
+Este directorio contiene la especificación completa del ciclo de vida multi-agente, junto con el **Orquestador CLI nativo en TypeScript**, diseñado para coordinar de forma automática y visual a los distintos agentes especialistas en el desarrollo BDD/TDD, auditoría de código y pruebas de mutación.
 
 ---
 
 ## 🛠️ Stack Tecnológico de Destino (Reglas para la IA)
 
-Cualquier IA que asuma un rol de desarrollo o auditoría en este proyecto debe ceñirse estrictamente a las tecnologías del proyecto, buscará en su documentación las decisiones técnicas sobre la tecnología adoptada, en caso de no existir esa documentación por defecto usará:
+Cualquier IA que asuma un rol de desarrollo o auditoría en este proyecto debe ceñirse estrictamente a las tecnologías del proyecto:
 
 - **Backend:** Java 17+, Spring Framework (Boot, Security, etc.), jOOQ (acceso a datos seguro con tipos generados).
   - Herramienta de compilación: Gradle (`./gradlew classes`, `./gradlew test`).
@@ -18,7 +18,7 @@ Cualquier IA que asuma un rol de desarrollo o auditoría en este proyecto debe c
 
 ## 🔄 Flujo Operativo y Máquina de Estados (Ciclo de Vida)
 
-El ciclo de vida de desarrollo de cualquier funcionalidad (feature) progresa de manera rigurosa de extremo a extremo a través de las siguientes etapas obligatorias, coordinadas por el **Craftsman Lead**:
+El ciclo de vida progresará de manera rigurosa coordinado automáticamente por el orquestador (**Craftsman Lead**):
 
 ```text
 [Inicio] -> 1. Spec Partner (Debate) -> Genera specs/[XXXX]/hard_spec.md
@@ -50,10 +50,10 @@ El ciclo de vida de desarrollo de cualquier funcionalidad (feature) progresa de 
 
 | Etapa            | Estado en `current.md`                | Último Agente Activo | Acción / Artefacto Generado                                                                                                                                    |
 | :--------------- | :------------------------------------ | :------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **0. Inicio**    | `pending`                             | Ninguno              | feature creada en estado inicial de espera.                                                                                                                    |
-| **1. Debate**    | `spec_approved`                       | `Spec Partner`       | Refina requisitos en Grill Mode; guarda la especificación técnica refinada en `specs/[XXXX]/hard_spec.md`.                                                     |
-| **2. Contrato**  | `gherkin_generated`                   | `Gherkin Author`     | Traduce la spec a escenarios de negocio Dado-Cuando-Entonces numerados (`@S1`, `@S2`...) en `features/[XXXX].feature`.                                         |
-| **3. Puerta**    | `human_approved`                      | `Craftsman Lead`     | Detiene el flujo y pide confirmación manual ("Aprobar") al desarrollador en terminal.                                                                          |
+| **0. Inicio**    | `pending`                             | Ninguno              | Feature creada en estado inicial de espera.                                                                                                                    |
+| **1. Debate**    | `spec_approved`                       | `Spec Partner`       | Refina requisitos en Grill Mode; guarda la especificación en `specs/[XXXX]/hard_spec.md`.                                                                      |
+| **2. Contrato**  | `gherkin_generated`                   | `Gherkin Author`     | Traduce la spec a escenarios Dado-Cuando-Entonces numerados (`@S1`, `@S2`...) en `features/[XXXX].feature`.                                                    |
+| **3. Puerta**    | `human_approved`                      | `Craftsman Lead`     | Detiene el flujo y pide confirmación manual (`Aprobar`) al desarrollador en terminal.                                                                          |
 | **4. TDD**       | `tdd_completed`                       | `TDD Craftsman`      | Desarrolla incrementalmente el código y tests mediante las tres leyes de TDD; registra los pasos en `specs/[XXXX]/tdd_log.md`.                                 |
 | **5. Auditoría** | `audit_passed` / `audit_failed`       | `Judge`              | Audita correspondencia 1:1 de escenarios con tests, i18n, refactorización real y cero hacks. Genera `specs/[XXXX]/audit_report.md`. Si falla, retrocede a TDD. |
 | **6. Mutación**  | `mutation_passed` / `mutation_failed` | `Mutation Tester`    | Ejecuta el script `./harness/scripts/mutate.py`. Si hay supervivientes lógicos (tests débiles), retrocede a TDD con detalles de corrección.                    |
@@ -61,54 +61,94 @@ El ciclo de vida de desarrollo de cualquier funcionalidad (feature) progresa de 
 
 ---
 
-## ⚡ Automatización de Tareas (Scripts de Apoyo)
+## ⚡ Orquestador CLI en TypeScript (Instrucciones de Uso)
 
-### 1. Inicialización de Tareas (`create_task.py`)
+El orquestador automatiza por completo las llamadas de agentes y transiciones de estado, interactuando con el LLM (Gemini) y proveyendo herramientas locales a los sub-agentes para la lectura/escritura de archivos y ejecución de pruebas.
 
-El script automatiza la inicialización limpia de nuevas características, escaneando secuencialmente el directorio `specs/` y configurando el handoff de control:
+### 📋 Prerrequisitos y Configuración
 
+1. Instalar las dependencias del proyecto:
+   ```bash
+   npm install
+   ```
+2. Asegurarse de tener una clave de API válida configurada en tu entorno:
+   ```bash
+   export GEMINI_API_KEY="tu-api-key"
+   ```
+   *(Opcional) Puedes definir un archivo `.env` en la raíz de este directorio con la variable `GEMINI_API_KEY=tu-api-key`.*
+
+---
+
+### 🚀 Comandos del Orquestador
+
+El orquestador se ejecuta utilizando `npx tsx` directamente sobre los módulos de entrada:
+
+#### 1. Inicializar una Funcionalidad (`init`)
+Crea de manera automática la estructura de carpetas en `specs/` e inicializa el archivo `current.md` en estado `pending`.
 ```bash
-./harness/scripts/create_task.py "Nombre de la Feature"
+npx tsx src/cli.ts init "Nombre de la Funcionalidad"
+```
+**Ejemplo de salida en terminal:**
+```text
+ℹ Inicializando funcionalidad "Pago con tarjeta" mediante create_task.py...
+============================================================
+        ¡FUNCIONALIDAD INICIALIZADA CON ÉXITO!        
+============================================================
+[+] Carpeta de Especificaciones:  specs/0002-pago_con_tarjeta/
+[+] Archivo de Estado (Handoff):  specs/0002-pago_con_tarjeta/current.md
+[+] Ruta Futura de Gherkin:       features/0002-pago_con_tarjeta.feature
+------------------------------------------------------------
 ```
 
-_Impacto:_ Crea de forma automática la subcarpeta en `specs/` e inicializa `current.md` en estado `pending`.
+*Para tareas Frontend y Backend independientes en paralelo, puedes bifurcar la subtarea:*
+```bash
+# Para el Backend:
+npx tsx src/cli.ts init "Pago Backend" --subtask 2
 
-#### 🔀 Bifurcación para tareas Frontend y Backend
+# Para el Frontend:
+npx tsx src/cli.ts init "Pago Frontend" --subtask 2
+```
 
-Cuando una funcionalidad afecta tanto al frontend como al backend, se recomienda bifurcar el desarrollo en dos sub-tareas independientes y paralelas tras la aprobación de la especificación técnica y el contrato Gherkin (Puerta Humana).
+#### 2. Arrancar y Correr la Orquestación (`run`)
+Inicia el bucle de la máquina de estados. Lee la situación actual en `current.md`, selecciona e invoca al agente correspondiente con el LLM y gestiona las retroalimentaciones.
+```bash
+npx tsx src/cli.ts run specs/0002-pago_con_tarjeta
+```
+*(También puedes pasar la ruta directa al archivo `current.md`: `npx tsx src/cli.ts run specs/0002-pago_con_tarjeta/current.md`)*
 
-Para mantener la coherencia y trazabilidad:
-- Se crearán dos carpetas usando el mismo número secuencial, pero añadiendo los sufijos `_backend` y `_frontend` respectivamente:
-  ```bash
-  # Para inicializar la sub-tarea Backend:
-  ./harness/scripts/create_task.py "Nombre de la Feature Backend"
-  
-  # Para inicializar la sub-tarea Frontend:
-  ./harness/scripts/create_task.py "Nombre de la Feature Frontend"
-  ```
-- *Ejemplo de estructura:*
-  - `specs/0002-gestion_usuarios_backend/`
-  - `specs/0002-gestion_usuarios_frontend/`
-- Ambas carpetas heredarán el mismo contrato de API y especificación técnica acordados previamente, facilitando el desarrollo en paralelo y reduciendo interferencias entre flujos de trabajo.
+---
 
-### 2. Pruebas de Resistencia y Mutación de Operadores (`mutate.py`)
+### 🎨 Consola Coloreada y Test Feedback
+El orquestador analiza la terminal de forma interactiva y tiñe las salidas para una inspección rápida en vivo:
+- ⏳ **Rojo en Negrita (`pending` / `audit_failed` / `mutation_failed`):** Denota estados en espera, devoluciones o errores del sistema.
+- ✔️ **Verde en Negrita (`spec_approved` / `tdd_completed` / `done` / etc.):** Denota etapas finalizadas con éxito.
+- ✖️ **TEST FAILED / ✔️ TEST PASSED:** Los resultados de las compilaciones y suites de pruebas ejecutadas por los sub-agentes se interceptan en consola y se pintan con colores específicos.
 
-El motor de mutación altera intencionalmente operadores lógicos (`==`, `!=`, `<`, `>`, `&&`, `||`, `true`, `false`) para validar la solidez de las pruebas del proyecto.
+---
 
+### 🛡️ Reglas y Protecciones del Orquestador
+
+1. **Puerta Humana Interactiva:** Al generarse el contrato Gherkin, la CLI detiene el flujo y requiere que el operador apruebe explícitamente (`Aprobar` / `si`) para habilitar el desarrollo TDD.
+2. **Protección de Bucles Infinitos:** Si se detecta un ciclo repetitivo de fallos entre el TDD Craftsman, el Judge o el Mutation Tester más de **3 veces consecutivas**, el orquestador bloquea la ejecución automática y solicita asistencia humana en consola.
+3. **Credenciales:** Protege de forma estricta las claves de API (nunca se imprimen ni se loguean en consola).
+
+---
+
+## ⚡ Scripts Auxiliares de Soporte
+
+### 1. Pruebas de Resistencia y Mutación (`mutate.py`)
+Utilizado automáticamente por el agente **Mutation Tester** para alterar operadores lógicos y certificar la dureza de los tests:
 ```bash
 ./harness/scripts/mutate.py --files src/main/java/Servicio.java --test-cmd "./gradlew test" --out specs/0001-gestion_usuario/mutation_results.json
 ```
 
-_Reglas de optimización para la IA:_
-
-- **Filtro Inteligente de UI:** El script descarta mutar líneas estéticas (propiedades `className`, estilos inline o importaciones de iconos) para ahorrar tiempo y evitar falsos supervivientes.
-- **Tests Quirúrgicos:** Para acelerar las pruebas, configure siempre el comando exacto del test unitario de la clase mutada (ej: `npm run test -- Componente.test.tsx` o `./gradlew test --tests "*ServicioTest*"`), reduciendo el tiempo de mutación de minutos a segundos.
-
 ---
 
-## 🌐 Integración de Herdr (Multiplexor de Agentes)
+## 🌐 Integración Unificada con Herdr
 
-Para flujos de trabajo avanzados o paralelización de tareas (como el desarrollo conjunto de Frontend/Backend), el arnés es plenamente compatible con **Herdr**, un multiplexor de terminales para coordinar agentes de codificación en tiempo real.
+Si utilizas el orquestador dentro de un entorno gestionado por **Herdr** (`HERDR_ENV=1`), el Craftsman Lead de forma nativa:
+- Crea pestañas ordenadas automáticamente con el formato `"{Prefijo_Numérico} - {Nombre_Agente}"`.
+- Reporta el estado dinámico del panel actual (ej. `working`, `blocked` o `idle`) con un texto de actividad descriptivo en la cabecera del multiplexor.
+- Actualiza dinámicamente los metadatos y colores del título del terminal del panel hermano.
 
-Toda la documentación detallada sobre cómo validar el entorno, lanzar sub-agentes en paneles paralelos y monitorizar su salida la tienes disponible en:
-👉 **[Guía de Integración de Herdr (harness/herdr.md)](./herdr.md)**
+Para más detalles consulta: 👉 **[Guía de Integración de Herdr (harness/herdr.md)](./herdr.md)**

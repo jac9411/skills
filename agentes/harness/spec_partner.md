@@ -1,8 +1,6 @@
 ---
 name: spec-partner
 description: "Socio de diseño de requisitos. Refina ideas en Grill Mode hasta consolidar el diseño técnico en hard_spec.md."
-tools:
-  - url_context
 ---
 
 # Especificación del Agente: Spec Partner

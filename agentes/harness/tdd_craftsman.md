@@ -1,8 +1,6 @@
 ---
 name: tdd-craftsman
 description: "Desarrollador de alta rigurosidad técnica. Implementa código de producción y tests siguiendo las tres leyes de TDD y Clean Code."
-tools:
-  - code_execution
 ---
 
 # Especificación del Agente: TDD Craftsman

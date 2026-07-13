@@ -1,0 +1,9 @@
+#!/bin/bash
+# Wrapper script to execute the Harness CLI from any directory
+
+# Target Repository root directory
+REPO_DIR="/home/jalvarez/git/skills/agentes/harness"
+
+# Run tsx pointing to the CLI with all passed arguments
+# Using --prefix allows running npx in the context of the harness directory
+npx --prefix "$REPO_DIR" tsx "$REPO_DIR/src/cli.ts" "$@"

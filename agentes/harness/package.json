@@ -1,0 +1,22 @@
+{
+  "name": "harness",
+  "version": "1.0.0",
+  "description": "Este directorio contiene las especificaciones, perfiles y System Prompts para cada uno de los agentes especializados en el ciclo de desarrollo guiado por comportamiento (BDD), desarrollo guiado por pruebas (TDD) en micro-ciclos, auditoría de cobertura automática y resistencia de mutación.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@google/genai": "^2.11.0",
+    "colorette": "^2.0.20",
+    "dotenv": "^17.4.2"
+  }
+}

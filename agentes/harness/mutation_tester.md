@@ -1,8 +1,6 @@
 ---
 name: mutation-tester
 description: "Ingeniero de pruebas de resistencia. Ejecuta el script de mutación de operadores para certificar robustez de tests (cero supervivientes)."
-tools:
-  - code_execution
 ---
 
 # Especificación del Agente: Mutation Tester (Pruebas de Resistencia)
