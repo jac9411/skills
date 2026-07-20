@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -116,6 +116,133 @@ func getAgents(socketPath string) ([]AgentInfo, error) {
 	}
 }
 
+func getTabLabels(socketPath string, workspaceID string) (map[string]string, error) {
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+	id := fmt.Sprintf("req_tabs_%d", time.Now().UnixNano())
+	req := map[string]interface{}{
+		"id":     id,
+		"method": "tab.list",
+		"params": map[string]interface{}{
+			"workspace_id": workspaceID,
+		},
+	}
+
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = conn.Write(append(reqBytes, '\n'))
+	if err != nil {
+		return nil, err
+	}
+
+	dec := json.NewDecoder(conn)
+	for {
+		var msg struct {
+			ID    string `json:"id"`
+			Error interface{} `json:"error"`
+			Result struct {
+				Tabs []struct {
+					TabID string `json:"tab_id"`
+					Label string `json:"label"`
+				} `json:"tabs"`
+			} `json:"result"`
+		}
+		if err := dec.Decode(&msg); err != nil {
+			return nil, err
+		}
+
+		if msg.ID == id {
+			if msg.Error != nil {
+				return nil, fmt.Errorf("API error: %v", msg.Error)
+			}
+			labels := make(map[string]string)
+			for _, t := range msg.Result.Tabs {
+				labels[t.TabID] = t.Label
+			}
+			return labels, nil
+		}
+	}
+}
+
+func buildTabLabelsMap(socketPath string, agents []AgentInfo) map[string]string {
+	labels := make(map[string]string)
+	visitedWorkspaces := make(map[string]bool)
+
+	for _, a := range agents {
+		if a.WorkspaceID == "" || visitedWorkspaces[a.WorkspaceID] {
+			continue
+		}
+		visitedWorkspaces[a.WorkspaceID] = true
+		workspaceLabels, err := getTabLabels(socketPath, a.WorkspaceID)
+		if err == nil {
+			for k, v := range workspaceLabels {
+				labels[k] = v
+			}
+		}
+	}
+	return labels
+}
+
+func getPaneIDs(socketPath string) ([]string, error) {
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	id := fmt.Sprintf("req_panes_%d", time.Now().UnixNano())
+	req := SocketMessage{
+		ID:     id,
+		Method: "pane.list",
+		Params: map[string]interface{}{},
+	}
+
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = conn.Write(append(reqBytes, '\n'))
+	if err != nil {
+		return nil, err
+	}
+
+	dec := json.NewDecoder(conn)
+	for {
+		var msg struct {
+			ID    string `json:"id"`
+			Error interface{} `json:"error"`
+			Result struct {
+				Panes []struct {
+					PaneID string `json:"pane_id"`
+				} `json:"panes"`
+			} `json:"result"`
+		}
+		if err := dec.Decode(&msg); err != nil {
+			return nil, err
+		}
+
+		if msg.ID == id {
+			if msg.Error != nil {
+				return nil, fmt.Errorf("API error: %v", msg.Error)
+			}
+			var ids []string
+			for _, p := range msg.Result.Panes {
+				ids = append(ids, p.PaneID)
+			}
+			return ids, nil
+		}
+	}
+}
+
 func main() {
 	socketFlag := flag.String("socket", "", "Path to the Herdr UNIX domain socket (default: resolved from HERDR_SOCKET_PATH or ~/.config/herdr/herdr.sock)")
 	watchFlag := flag.Bool("watch", false, "Enable watch mode to stream real-time agent status changes")
@@ -138,147 +265,166 @@ func main() {
 	}
 
 	if !*watchFlag {
-		printAgentsTable(agents)
+		printAgentsTable(agents, socketPath)
 		return
 	}
 
-	// Watch Mode:
-	fmt.Printf("Watching Herdr agents on socket %s...\n", socketPath)
-	fmt.Println("\n--- INITIAL SNAPSHOT ---")
-	printAgentsTable(agents)
-	fmt.Println("------------------------")
-	fmt.Println("Listening for live agent status changes...")
-
-	// 2. Open a persistent connection for events streaming
-	conn, err := net.Dial("unix", socketPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to connect to Herdr socket: %v\n", err)
-		os.Exit(1)
-	}
-	defer conn.Close()
-
-	// Channels to route asynchronous responses
-	responseChans := make(map[string]chan *SocketMessage)
-	var mu sync.Mutex
-
-	// Goroutine to continuously read NDJSON from the socket
-	dec := json.NewDecoder(conn)
-	eventChan := make(chan *SocketMessage, 100)
-
-	go func() {
-		for {
-			var msg SocketMessage
-			if err := dec.Decode(&msg); err != nil {
-				if err != io.EOF && !strings.Contains(err.Error(), "use of closed network connection") {
-					fmt.Fprintf(os.Stderr, "Socket connection error: %v\n", err)
-				}
-				break
-			}
-
-			// Route by ID if it's a response
-			if msg.ID != "" {
-				mu.Lock()
-				ch, ok := responseChans[msg.ID]
-				mu.Unlock()
-				if ok {
-					ch <- &msg
-				}
-			} else if msg.Event != "" {
-				eventChan <- &msg
-			}
-		}
-		close(eventChan)
-	}()
-
-	// Helper to send a request and wait for the response
-	sendRequest := func(method string, params interface{}) (*SocketMessage, error) {
-		id := fmt.Sprintf("req_%d", time.Now().UnixNano())
-		req := SocketMessage{
-			ID:     id,
-			Method: method,
-			Params: params,
-		}
-
-		reqBytes, err := json.Marshal(req)
+	// Watch Mode: Run persistent connection loop with automatic reconnect and dynamic subscriptions
+	var lastAgents []AgentInfo
+	for {
+		// 1. Retrieve latest agents list
+		currentAgents, err := getAgents(socketPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal request: %w", err)
-		}
-
-		ch := make(chan *SocketMessage, 1)
-		mu.Lock()
-		responseChans[id] = ch
-		mu.Unlock()
-
-		defer func() {
-			mu.Lock()
-			delete(responseChans, id)
-			mu.Unlock()
-		}()
-
-		_, err = conn.Write(append(reqBytes, '\n'))
-		if err != nil {
-			return nil, fmt.Errorf("failed to write request: %w", err)
-		}
-
-		select {
-		case resp := <-ch:
-			if resp.Error != nil {
-				return nil, fmt.Errorf("API error: %v", resp.Error)
-			}
-			return resp, nil
-		case <-time.After(5 * time.Second):
-			return nil, fmt.Errorf("request timeout")
-		}
-	}
-
-	// Dynamically build subscription list:
-	// - Subscribe to pane.agent_detected globally
-	// - Subscribe to pane.agent_status_changed for each existing agent pane
-	subscriptions := []Subscription{
-		{Type: "pane.agent_detected"},
-	}
-	for _, a := range agents {
-		subscriptions = append(subscriptions, Subscription{
-			Type:   "pane.agent_status_changed",
-			PaneID: a.PaneID,
-		})
-	}
-
-	subParams := EventsSubscribeParams{
-		Subscriptions: subscriptions,
-	}
-
-	_, err = sendRequest("events.subscribe", subParams)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: Failed to subscribe to events: %v. Live updates may not stream.\n", err)
-	}
-
-	// Handle streamed events
-	for event := range eventChan {
-		timeStr := time.Now().Format("15:04:05")
-		if event.Data == nil {
+			fmt.Fprintf(os.Stderr, "Error querying agents: %v\n", err)
+			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		agentName := "unknown"
-		if event.Data.Agent != nil {
-			agentName = *event.Data.Agent
-		} else if event.Data.DisplayAgent != nil {
-			agentName = *event.Data.DisplayAgent
+		// Print updated table
+		printUpdatedTable(currentAgents, &lastAgents, socketPath)
+
+		// 2. Open a persistent connection for events streaming
+		conn, err := net.Dial("unix", socketPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: Failed to connect to Herdr socket: %v\n", err)
+			time.Sleep(1 * time.Second)
+			continue
 		}
 
-		status := colorizeStatus(event.Data.AgentStatus, event.Data.CustomStatus, true)
+		// Channels to route asynchronous responses
+		responseChans := make(map[string]chan *SocketMessage)
+		var mu sync.Mutex
 
-		switch event.Event {
-		case "pane.agent_status_changed":
-			fmt.Printf("[%s] CHANGE: Agent %q status is now %s in Pane %s (Workspace: %s)\n",
-				timeStr, agentName, status, event.Data.PaneID, event.Data.WorkspaceID)
-		case "pane.agent_detected":
-			fmt.Printf("[%s] DETECT: Agent %q detected in Pane %s (Workspace: %s)\n",
-				timeStr, agentName, event.Data.PaneID, event.Data.WorkspaceID)
-		default:
-			fmt.Printf("[%s] EVENT %q: Pane %s\n", timeStr, event.Event, event.Data.PaneID)
+		// Goroutine to continuously read NDJSON from the socket
+		dec := json.NewDecoder(conn)
+		eventChan := make(chan *SocketMessage, 100)
+		doneChan := make(chan bool)
+
+		go func() {
+			for {
+				var msg SocketMessage
+				if err := dec.Decode(&msg); err != nil {
+					break
+				}
+
+				if msg.ID != "" {
+					mu.Lock()
+					ch, ok := responseChans[msg.ID]
+					mu.Unlock()
+					if ok {
+						ch <- &msg
+					}
+				} else if msg.Event != "" {
+					eventChan <- &msg
+				}
+			}
+			close(eventChan)
+			close(doneChan)
+		}()
+
+		sendRequest := func(method string, params interface{}) (*SocketMessage, error) {
+			id := fmt.Sprintf("req_%d", time.Now().UnixNano())
+			req := SocketMessage{
+				ID:     id,
+				Method: method,
+				Params: params,
+			}
+
+			reqBytes, err := json.Marshal(req)
+			if err != nil {
+				return nil, err
+			}
+
+			ch := make(chan *SocketMessage, 1)
+			mu.Lock()
+			responseChans[id] = ch
+			mu.Unlock()
+
+			defer func() {
+				mu.Lock()
+				delete(responseChans, id)
+				mu.Unlock()
+			}()
+
+			_, err = conn.Write(append(reqBytes, '\n'))
+			if err != nil {
+				return nil, err
+			}
+
+			select {
+			case resp := <-ch:
+				if resp.Error != nil {
+					return nil, fmt.Errorf("API error: %v", resp.Error)
+				}
+				return resp, nil
+			case <-time.After(5 * time.Second):
+				return nil, fmt.Errorf("request timeout")
+			}
 		}
+
+		// Build subscription list
+		subscriptions := []Subscription{
+			{Type: "pane.agent_detected"},
+		}
+		
+		paneIDs, err := getPaneIDs(socketPath)
+		if err == nil {
+			for _, pid := range paneIDs {
+				subscriptions = append(subscriptions, Subscription{
+					Type:   "pane.agent_status_changed",
+					PaneID: pid,
+				})
+			}
+		}
+
+		subParams := EventsSubscribeParams{
+			Subscriptions: subscriptions,
+		}
+
+		_, err = sendRequest("events.subscribe", subParams)
+		if err != nil {
+			conn.Close()
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		// Ticker to poll and force-update every 1 second
+		ticker := time.NewTicker(1 * time.Second)
+
+		// Read events or tick until we need to reconnect
+		loop:
+		for {
+			select {
+			case event, ok := <-eventChan:
+				if !ok {
+					break loop
+				}
+
+				switch event.Event {
+				case "pane.agent_detected":
+					break loop
+
+				case "pane.agent_status_changed":
+					latestAgents, err := getAgents(socketPath)
+					if err == nil {
+						printUpdatedTable(latestAgents, &lastAgents, socketPath)
+					}
+				}
+
+			case <-ticker.C:
+				latestAgents, err := getAgents(socketPath)
+				if err == nil {
+					printUpdatedTable(latestAgents, &lastAgents, socketPath)
+				}
+			}
+		}
+		ticker.Stop()
+
+		conn.Close()
+		<-doneChan // Wait for reader goroutine to exit
+
+		// Small delay before looping to prevent hot loops
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -297,42 +443,130 @@ func getSocketPath(override string) string {
 	return filepath.Join(home, ".config", "herdr", "herdr.sock")
 }
 
-func printAgentsTable(agents []AgentInfo) {
+func printAgentsTable(agents []AgentInfo, socketPath string) {
 	if len(agents) == 0 {
 		fmt.Println("No active Herdr agents found.")
 		return
 	}
 
+	tabLabels := buildTabLabelsMap(socketPath, agents)
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "AGENT\tSTATUS\tWORKSPACE\tTAB\tPANE\tFOCUS\tCWD")
-	fmt.Fprintln(w, "-----\t------\t---------\t---\t----\t-----\t---")
+	fmt.Fprintln(w, "AGENTE\tESTADO")
+	fmt.Fprintln(w, "------\t------")
 
 	for _, a := range agents {
 		// Determine the name
-		name := a.Name
+		agentName := a.Name
 		if a.Agent != nil {
-			name = *a.Agent
+			agentName = *a.Agent
+		} else if a.DisplayAgent != nil {
+			agentName = *a.DisplayAgent
 		}
 
-		// Status string with color support
+		tabLabel, ok := tabLabels[a.TabID]
+		if !ok || tabLabel == "" {
+			tabLabel = a.TabID
+			if tabLabel == "" {
+				tabLabel = "unknown"
+			}
+		}
+
+		combinedName := fmt.Sprintf("%s-%s", tabLabel, agentName)
 		status := colorizeStatus(a.AgentStatus, a.CustomStatus, false)
 
-		focusStr := "no"
-		if a.Focused {
-			focusStr = "yes"
-		}
-
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			name,
-			status,
-			a.WorkspaceID,
-			a.TabID,
-			a.PaneID,
-			focusStr,
-			a.CWD,
-		)
+		fmt.Fprintf(w, "%s\t%s\n", combinedName, status)
 	}
 	w.Flush()
+}
+
+func agentsEqual(a, b []AgentInfo) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].PaneID != b[i].PaneID ||
+			a[i].AgentStatus != b[i].AgentStatus ||
+			a[i].TabID != b[i].TabID ||
+			a[i].WorkspaceID != b[i].WorkspaceID {
+			return false
+		}
+
+		nameA := a[i].Name
+		if a[i].Agent != nil {
+			nameA = *a[i].Agent
+		} else if a[i].DisplayAgent != nil {
+			nameA = *a[i].DisplayAgent
+		}
+
+		nameB := b[i].Name
+		if b[i].Agent != nil {
+			nameB = *b[i].Agent
+		} else if b[i].DisplayAgent != nil {
+			nameB = *b[i].DisplayAgent
+		}
+
+		if nameA != nameB {
+			return false
+		}
+
+		statusA := ""
+		if a[i].CustomStatus != nil {
+			statusA = *a[i].CustomStatus
+		}
+		statusB := ""
+		if b[i].CustomStatus != nil {
+			statusB = *b[i].CustomStatus
+		}
+		if statusA != statusB {
+			return false
+		}
+	}
+	return true
+}
+
+func copyAgents(agents []AgentInfo) []AgentInfo {
+	dst := make([]AgentInfo, len(agents))
+	for i, a := range agents {
+		dst[i] = a
+		if a.Agent != nil {
+			val := *a.Agent
+			dst[i].Agent = &val
+		}
+		if a.CustomStatus != nil {
+			val := *a.CustomStatus
+			dst[i].CustomStatus = &val
+		}
+		if a.DisplayAgent != nil {
+			val := *a.DisplayAgent
+			dst[i].DisplayAgent = &val
+		}
+	}
+	return dst
+}
+
+func printUpdatedTable(agentsList []AgentInfo, lastAgents *[]AgentInfo, socketPath string) {
+	sort.Slice(agentsList, func(i, j int) bool {
+		if agentsList[i].WorkspaceID != agentsList[j].WorkspaceID {
+			return agentsList[i].WorkspaceID < agentsList[j].WorkspaceID
+		}
+		if agentsList[i].TabID != agentsList[j].TabID {
+			return agentsList[i].TabID < agentsList[j].TabID
+		}
+		return agentsList[i].PaneID < agentsList[j].PaneID
+	})
+
+	if lastAgents != nil && agentsEqual(agentsList, *lastAgents) {
+		return // No changes, avoid redrawing
+	}
+
+	// Clear screen and redraw table
+	fmt.Print("\033[H\033[2J")
+	printAgentsTable(agentsList, socketPath)
+
+	if lastAgents != nil {
+		*lastAgents = copyAgents(agentsList)
+	}
 }
 
 func isTTY() bool {
