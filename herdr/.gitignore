@@ -1,0 +1,14 @@
+# Go compiled binaries
+herdr-agents
+herdr-monitor
+
+# Executables and architectures
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries and output files
+*.test
+*.out
