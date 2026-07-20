@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
-	"text/tabwriter"
 	"time"
 )
 
@@ -450,10 +450,27 @@ func printAgentsTable(agents []AgentInfo, socketPath string) {
 	}
 
 	tabLabels := buildTabLabelsMap(socketPath, agents)
+	formatAgentsTable(os.Stdout, agents, tabLabels)
+}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "AGENTE\tESTADO")
-	fmt.Fprintln(w, "------\t------")
+func formatAgentsTable(w io.Writer, agents []AgentInfo, tabLabels map[string]string) {
+	tabPaneCounts := make(map[string]int)
+	for _, a := range agents {
+		if a.TabID != "" {
+			tabPaneCounts[a.TabID]++
+		}
+	}
+
+	type tableRow struct {
+		combinedName string
+		cleanStatus  string
+		focused      string
+		rawAgent     AgentInfo
+	}
+
+	var rows []tableRow
+	maxAgentWidth := len("AGENTE")
+	maxStatusWidth := len("ESTADO")
 
 	for _, a := range agents {
 		// Determine the name
@@ -472,12 +489,63 @@ func printAgentsTable(agents []AgentInfo, socketPath string) {
 			}
 		}
 
-		combinedName := fmt.Sprintf("%s-%s", tabLabel, agentName)
-		status := colorizeStatus(a.AgentStatus, a.CustomStatus, false)
+		var combinedName string
+		if a.TabID != "" && tabPaneCounts[a.TabID] > 1 {
+			shortPaneID := a.PaneID
+			parts := strings.Split(a.PaneID, ":")
+			if len(parts) > 1 {
+				shortPaneID = parts[len(parts)-1]
+			}
+			combinedName = fmt.Sprintf("%s-%s-%s", tabLabel, shortPaneID, agentName)
+		} else {
+			combinedName = fmt.Sprintf("%s-%s", tabLabel, agentName)
+		}
 
-		fmt.Fprintf(w, "%s\t%s\n", combinedName, status)
+		cleanStatus := a.AgentStatus
+		if a.CustomStatus != nil && *a.CustomStatus != "" {
+			cleanStatus = fmt.Sprintf("%s (%s)", a.AgentStatus, *a.CustomStatus)
+		}
+
+		focusVal := "-"
+		if a.Focused {
+			focusVal = "S"
+		}
+
+		if len(combinedName) > maxAgentWidth {
+			maxAgentWidth = len(combinedName)
+		}
+		if len(cleanStatus) > maxStatusWidth {
+			maxStatusWidth = len(cleanStatus)
+		}
+
+		rows = append(rows, tableRow{
+			combinedName: combinedName,
+			cleanStatus:  cleanStatus,
+			focused:      focusVal,
+			rawAgent:     a,
+		})
 	}
-	w.Flush()
+
+	// Dynamic column widths with safety spacing
+	agentColWidth := maxAgentWidth + 3
+	statusColWidth := maxStatusWidth + 3
+
+	// Print headers
+	fmt.Fprintf(w, "%-*s%-*s%s\n", agentColWidth, "AGENTE", statusColWidth, "ESTADO", "FOCO")
+	fmt.Fprintf(w, "%-*s%-*s%s\n", agentColWidth, "------", statusColWidth, "------", "----")
+
+	// Print rows
+	for _, r := range rows {
+		colorizedStatus := colorizeStatus(r.rawAgent.AgentStatus, r.rawAgent.CustomStatus, false)
+		
+		paddingLen := statusColWidth - len(r.cleanStatus)
+		if paddingLen < 0 {
+			paddingLen = 0
+		}
+		paddingSpaces := strings.Repeat(" ", paddingLen)
+
+		fmt.Fprintf(w, "%-*s%s%s%s\n", agentColWidth, r.combinedName, colorizedStatus, paddingSpaces, r.focused)
+	}
 }
 
 func agentsEqual(a, b []AgentInfo) bool {
@@ -488,7 +556,8 @@ func agentsEqual(a, b []AgentInfo) bool {
 		if a[i].PaneID != b[i].PaneID ||
 			a[i].AgentStatus != b[i].AgentStatus ||
 			a[i].TabID != b[i].TabID ||
-			a[i].WorkspaceID != b[i].WorkspaceID {
+			a[i].WorkspaceID != b[i].WorkspaceID ||
+			a[i].Focused != b[i].Focused {
 			return false
 		}
 
