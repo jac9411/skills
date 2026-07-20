@@ -1,10 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -33,20 +33,20 @@ type AgentListResult struct {
 
 // AgentInfo holds detailed information for a single Herdr agent.
 type AgentInfo struct {
-	TerminalID   string            `json:"terminal_id"`
-	Name         string            `json:"name"`
-	Agent        *string           `json:"agent,omitempty"`
-	AgentStatus  string            `json:"agent_status"`
-	WorkspaceID  string            `json:"workspace_id"`
-	TabID        string            `json:"tab_id"`
-	PaneID       string            `json:"pane_id"`
-	Focused      bool              `json:"focused"`
-	CWD          string            `json:"cwd"`
+	TerminalID    string            `json:"terminal_id"`
+	Name          string            `json:"name"`
+	Agent         *string           `json:"agent,omitempty"`
+	AgentStatus   string            `json:"agent_status"`
+	WorkspaceID   string            `json:"workspace_id"`
+	TabID         string            `json:"tab_id"`
+	PaneID        string            `json:"pane_id"`
+	Focused       bool              `json:"focused"`
+	CWD           string            `json:"cwd"`
 	ForegroundCWD string            `json:"foreground_cwd"`
-	Revision     uint64            `json:"revision"`
-	CustomStatus *string           `json:"custom_status,omitempty"`
-	DisplayAgent *string           `json:"display_agent,omitempty"`
-	StateLabels  map[string]string `json:"state_labels,omitempty"`
+	Revision      uint64            `json:"revision"`
+	CustomStatus  *string           `json:"custom_status,omitempty"`
+	DisplayAgent  *string           `json:"display_agent,omitempty"`
+	StateLabels   map[string]string `json:"state_labels,omitempty"`
 }
 
 // PaneAgentStatusChangedEvent contains status details sent in stream events.
@@ -97,16 +97,11 @@ func getAgents(socketPath string) ([]AgentInfo, error) {
 		return nil, err
 	}
 
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
+	dec := json.NewDecoder(conn)
+	for {
 		var msg SocketMessage
-		if err := json.Unmarshal(line, &msg); err != nil {
-			continue
+		if err := dec.Decode(&msg); err != nil {
+			return nil, err
 		}
 
 		if msg.ID == id {
@@ -119,10 +114,6 @@ func getAgents(socketPath string) ([]AgentInfo, error) {
 			return nil, fmt.Errorf("empty result")
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	return nil, fmt.Errorf("connection closed before response")
 }
 
 func main() {
@@ -171,19 +162,17 @@ func main() {
 	var mu sync.Mutex
 
 	// Goroutine to continuously read NDJSON from the socket
-	scanner := bufio.NewScanner(conn)
+	dec := json.NewDecoder(conn)
 	eventChan := make(chan *SocketMessage, 100)
 
 	go func() {
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			if len(line) == 0 {
-				continue
-			}
-
+		for {
 			var msg SocketMessage
-			if err := json.Unmarshal(line, &msg); err != nil {
-				continue
+			if err := dec.Decode(&msg); err != nil {
+				if err != io.EOF && !strings.Contains(err.Error(), "use of closed network connection") {
+					fmt.Fprintf(os.Stderr, "Socket connection error: %v\n", err)
+				}
+				break
 			}
 
 			// Route by ID if it's a response
@@ -197,9 +186,6 @@ func main() {
 			} else if msg.Event != "" {
 				eventChan <- &msg
 			}
-		}
-		if err := scanner.Err(); err != nil {
-			fmt.Fprintf(os.Stderr, "Socket connection error: %v\n", err)
 		}
 		close(eventChan)
 	}()
@@ -281,10 +267,7 @@ func main() {
 			agentName = *event.Data.DisplayAgent
 		}
 
-		status := strings.ToUpper(event.Data.AgentStatus)
-		if event.Data.CustomStatus != nil && *event.Data.CustomStatus != "" {
-			status = fmt.Sprintf("%s (%s)", status, *event.Data.CustomStatus)
-		}
+		status := colorizeStatus(event.Data.AgentStatus, event.Data.CustomStatus, true)
 
 		switch event.Event {
 		case "pane.agent_status_changed":
@@ -308,8 +291,8 @@ func getSocketPath(override string) string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		// Fallback to absolute local path if user home cannot be resolved
-		return "/home/jalvarez/.config/herdr/herdr.sock"
+		// Fallback to temporary directory if user home cannot be resolved
+		return filepath.Join(os.TempDir(), "herdr.sock")
 	}
 	return filepath.Join(home, ".config", "herdr", "herdr.sock")
 }
@@ -331,11 +314,8 @@ func printAgentsTable(agents []AgentInfo) {
 			name = *a.Agent
 		}
 
-		// Status string
-		status := a.AgentStatus
-		if a.CustomStatus != nil && *a.CustomStatus != "" {
-			status = fmt.Sprintf("%s (%s)", status, *a.CustomStatus)
-		}
+		// Status string with color support
+		status := colorizeStatus(a.AgentStatus, a.CustomStatus, false)
 
 		focusStr := "no"
 		if a.Focused {
@@ -353,4 +333,46 @@ func printAgentsTable(agents []AgentInfo) {
 		)
 	}
 	w.Flush()
+}
+
+func isTTY() bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	fileInfo, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (fileInfo.Mode() & os.ModeCharDevice) != 0
+}
+
+func colorizeStatus(agentStatus string, customStatus *string, uppercase bool) string {
+	displayStatus := agentStatus
+	if uppercase {
+		displayStatus = strings.ToUpper(agentStatus)
+	}
+	status := displayStatus
+	if customStatus != nil && *customStatus != "" {
+		status = fmt.Sprintf("%s (%s)", displayStatus, *customStatus)
+	}
+
+	if !isTTY() {
+		return status
+	}
+
+	var colorCode string
+	switch strings.ToLower(agentStatus) {
+	case "working":
+		colorCode = "\033[1;36m" // Bright Cyan
+	case "done":
+		colorCode = "\033[1;32m" // Bright Green
+	case "blocked":
+		colorCode = "\033[1;31m" // Bright Red
+	case "idle":
+		colorCode = "\033[90m" // Dark Gray (Atenuado)
+	default:
+		colorCode = "\033[1;33m" // Bright Yellow (unknown)
+	}
+
+	return colorCode + status + "\033[0m"
 }
